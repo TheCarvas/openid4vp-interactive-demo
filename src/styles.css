@@ -144,6 +144,17 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .sample-fallback p { margin: 0 0 12px; color: #654f19; font-size: 13px; }
 .demo-badge { color: #76570b; font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
 .sample-action { background: #6f5208; color: #fff; }
+.sample-action:disabled { background: #cbb887; cursor: not-allowed; }
+.sample-uploads { display: grid; gap: 4px; margin-bottom: 12px; }
+.sample-upload { margin: 6px 0; color: #4b3a08; }
+.sample-upload input[type="file"] { padding: 9px; border: 1px dashed #c2a24e; background: #fffdf6; font-size: 12px; font-weight: 500; }
+.sample-upload-status { font-size: 11px; font-weight: 600; overflow-wrap: anywhere; }
+.sample-upload-status.is-hint { color: #7a6428; }
+.sample-upload-status.is-ready { color: #2c6b37; }
+.sample-upload-status.is-error { color: #a3261c; }
+.required-label { color: #8a6a12; font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.sample-warning { border-left: 3px solid #c2a24e; padding-left: 10px; }
+.sample-fallback .sample-warning { color: #7a4a12; font-size: 12px; }
 
 .panel { margin-top: 22px; padding-top: 22px; border-top: 1px solid #e5e3de; }
 label { display: grid; gap: 7px; margin: 15px 0; font-size: 13px; font-weight: 700; }

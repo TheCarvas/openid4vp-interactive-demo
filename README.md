@@ -14,8 +14,10 @@ The flow is:
 
 When the Digital Credentials API is unavailable, the browser rejects the configured protocol, or
 `navigator.credentials.get()` rejects, the page exposes an explicit **Use sample credential** action.
-The fallback is never selected automatically. It asks the backend to load and verify the dedicated
-server-side fixture, then enters the same profile-confirmation or sign-in flow as a live credential.
+The fallback is never selected automatically, and the demo ships no sample credential of its own.
+The operator uploads a captured context/response pair in the fallback panel, the backend verifies it
+for that one request, then the flow enters the same profile-confirmation or sign-in path as a live
+credential.
 
 The request deliberately uses the simplest OpenID4VP 1.0 DC API profile:
 
@@ -79,7 +81,9 @@ server/diagnostics/            persistent correlated FE/BE diagnostic traces and
 server/openid4vp/request.ts     OpenID4VP request construction
 server/openid4vp/verifier.ts    live and sample verification policies
 server/openid4vp/sample-fixtures.ts
-                               on-demand server-only fixture loading
+                               validation of an uploaded sample credential
+server/openid4vp/test-credential.ts
+                               synthetic credential minting used only by tests
 server/http/                   origin, cookie, and error adapters
 ```
 
@@ -87,7 +91,7 @@ server/http/                   origin, cookie, and error adapters
 
 - `POST /api/auth/email/request` validates the selected claims and request type, then creates the complete nonce-bound DCQL request on the backend. `openid4vp-v1-signed` is represented in the API contract but rejected with a controlled response until signed-request support is implemented.
 - `POST /api/auth/email/verify` accepts a live `DigitalCredential.data` response.
-- `POST /api/auth/email/verify-sample` accepts only the current `flow_id`; it does not accept a credential or validation flags.
+- `POST /api/auth/email/verify-sample` accepts the current `flow_id` plus the uploaded `context` and `response` documents. It does not accept validation flags, and the server holds no sample credential to fall back on.
 - `POST /api/auth/email/signup` completes the common profile-confirmation flow.
 - `GET /api/diagnostics/config` exposes the backend diagnostic capabilities to the test UI.
 - `GET /api/diagnostics/traces/:traceId` returns a persisted correlated authentication trace.
@@ -126,28 +130,36 @@ The fallback appears only after a backend flow has been prepared and live browse
 unavailable or rejects. Click **Use sample credential** to invoke it. The UI and diagnostic output
 label every result as `sample` or `live`.
 
-The editable files are:
+### Supplying a sample credential
 
-- [`fixtures/sample-credential-context.json`](fixtures/sample-credential-context.json)
-- [`fixtures/sample-credential-response.json`](fixtures/sample-credential-response.json)
+The panel has two required file inputs:
 
-Both files are loaded from disk on every fallback invocation, so edits affect the next attempt without
-rebuilding the frontend or restarting the backend. They are never bundled into or supplied by the
-browser.
+- **Context file** &mdash; `nonce`, `origin`, `validationTimeSeconds`, and the Ed25519 `issuerJwk`.
+- **Response file** &mdash; the captured `protocol` and `data.vp_token`.
+
+Both are parsed and schema-checked in the browser, sent with the verification request, re-validated
+server-side, used for that single attempt, and then dropped. Nothing is written to disk and nothing
+persists between attempts.
+
+A captured Google credential contains the credential subject's real name, email address, and profile
+photo URL. Treat these files as personal data: keep them outside the repository (`fixtures/` and
+`*sample-credential*.json` are gitignored), and only upload a credential you are authorized to use.
+`server/openid4vp/test-credential.ts` mints synthetic credentials for the test suite so no real
+credential is ever needed to run tests.
 
 Sample mode still verifies:
 
 - the response protocol and `vp_token.user_info_query[0]` shape;
-- the issuer JWT with the fixture's Ed25519 issuer key;
+- the issuer JWT with the uploaded Ed25519 issuer key;
 - the expected Google issuer and `UserInfoCredential` VCT;
 - every SD-JWT disclosure digest;
 - the holder key and Key Binding JWT signature;
-- the Key Binding nonce against the captured fixture nonce;
+- the Key Binding nonce against the captured nonce;
 - the captured audience;
 - `sd_hash`; and
 - `email_verified=true` and the normal verified-claim extraction.
 
-Only fixed-fixture time/transaction behavior differs: sample nonce comparison uses the captured nonce,
+Only captured time/transaction behavior differs: sample nonce comparison uses the captured nonce,
 issuer validation uses `validationTimeSeconds`, and the captured string-form Key Binding `iat` is checked
 against that deterministic time. The live verifier continues to require the fresh backend nonce,
 `origin:<origin>` audience, strict numeric `iat`, and current-wall-clock freshness.

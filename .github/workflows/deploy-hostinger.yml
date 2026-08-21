@@ -57,8 +57,9 @@ jobs:
           chmod 600 ~/.ssh/known_hosts
 
       # Only what the host needs to run: the built client, the compiled server,
-      # the sample-credential fixtures, and the manifests used to install
-      # production dependencies on the host itself.
+      # and the manifests used to install production dependencies on the host
+      # itself. No sample credential is shipped; the demo fallback verifies one
+      # the operator uploads at request time.
       - name: Upload the release
         env:
           SSH_HOST: ${{ secrets.HOSTINGER_SSH_HOST }}
@@ -68,9 +69,11 @@ jobs:
           RSYNC_RSH: ssh -i ~/.ssh/deploy_key -p ${{ secrets.HOSTINGER_SSH_PORT || 22 }}
         run: |
           rsync -az --delete \
-            dist dist-server fixtures package.json package-lock.json \
+            dist dist-server package.json package-lock.json \
             "$SSH_USER@$SSH_HOST:$APP_PATH/"
 
+      # rsync --delete only prunes inside the directories it transfers, so the
+      # previously deployed fixtures/ directory is removed explicitly here.
       - name: Install production dependencies and restart
         env:
           SSH_HOST: ${{ secrets.HOSTINGER_SSH_HOST }}
@@ -80,7 +83,7 @@ jobs:
           RESTART_COMMAND: ${{ vars.HOSTINGER_RESTART_COMMAND }}
         run: |
           ssh -i ~/.ssh/deploy_key -p "${SSH_PORT:-22}" "$SSH_USER@$SSH_HOST" \
-            "set -e; cd '$APP_PATH'; npm ci --omit=dev; ${RESTART_COMMAND:-mkdir -p tmp && touch tmp/restart.txt}"
+            "set -e; cd '$APP_PATH'; rm -rf fixtures; npm ci --omit=dev; ${RESTART_COMMAND:-mkdir -p tmp && touch tmp/restart.txt}"
 
       - name: Confirm the deployment is serving
         env:

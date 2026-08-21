@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { decodeJwt } from 'jose';
-import { loadSampleCredentialFixtures, type SampleCredentialFixtures } from './sample-fixtures.js';
+import type { SampleCredentialFixtures } from './sample-fixtures.js';
+import { mintSampleCredential } from './test-credential.js';
 import {
   assertAudience,
   assertFreshKeyBinding,
@@ -13,12 +14,12 @@ import {
 
 const issuer = 'https://verifiablecredentials-pa.googleapis.com';
 
-test('the unmodified fixture verifies cryptographically and independently of the current date', async () => {
-  const fixtures = await loadSampleCredentialFixtures(process.cwd());
+test('an unmodified sample verifies cryptographically and independently of the current date', async () => {
+  const fixtures = await mintSampleCredential();
   const first = await verifySampleOpenId4VpResponse(fixtures);
   const second = await verifySampleOpenId4VpResponse(fixtures);
 
-  assert.equal(first.claims.email, 'ryan.watkins@mastercard.com');
+  assert.equal(first.claims.email, 'demo.user@example.com');
   assert.equal(first.claims.email_verified, true);
   assert.equal(first.debug.source, 'sample');
   assert.deepEqual(second.claims, first.claims);
@@ -59,7 +60,7 @@ test('a modified Key Binding JWT fails signature verification', async () => {
 });
 
 test('sd_hash is compared with the disclosed SD-JWT', async () => {
-  const fixtures = await loadSampleCredentialFixtures(process.cwd());
+  const fixtures = await mintSampleCredential();
   const presentation = getPresentation(fixtures);
   const segments = presentation.split('~');
   const payload = decodeJwt(segments[segments.length - 1]);
@@ -96,7 +97,7 @@ test('live nonce and freshness rules remain strict while sample time accepts the
 });
 
 async function clonedFixtures(): Promise<SampleCredentialFixtures> {
-  return structuredClone(await loadSampleCredentialFixtures(process.cwd()));
+  return mintSampleCredential();
 }
 
 function getPresentation(fixtures: SampleCredentialFixtures): string {
