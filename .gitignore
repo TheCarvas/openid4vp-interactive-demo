@@ -7,5 +7,6 @@ dist/
 .codex/
 graphify-out/
 AGENTS.md
+docs/
 *.log
 .DS_Store
