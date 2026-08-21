@@ -1,7 +1,19 @@
 # Deploying to Hostinger
 
 Target: `https://openid4vp.lionwolfstar.tech`, deployed automatically when a
-pull request merges into `main`.
+pull request merges into `hostinger-demo`.
+
+## Branches
+
+`main` is the trunk. `hostinger-demo` is the release branch, and it is the only
+branch Hostinger watches — merging into it is what deploys.
+
+Keeping deployment on its own branch means work can land on `main` without
+going live, and the demo can be pinned to a known-good commit while `main`
+moves. The cost is that the two branches drift, so treat a release as an
+explicit step: open a pull request from `main` (or from a feature branch) into
+`hostinger-demo` when you want the site updated. CI runs on every pull request
+regardless of which branch it targets.
 
 ## What this app needs from a host
 
@@ -32,9 +44,10 @@ so the automation you asked for needs no deployment secrets at all:
 - **GitHub Actions is the gate.** `.github/workflows/ci.yml` runs the type check,
   the test suite, a full build, and boots the compiled server with production
   dependencies only on every pull request.
-- **Hostinger is the deployer.** It watches `main` and redeploys on merge.
-- **Branch protection connects the two.** Require the `verify` check on `main`
-  so nothing reaches Hostinger without a green build.
+- **Hostinger is the deployer.** It watches `hostinger-demo` and redeploys on
+  merge.
+- **Branch protection connects the two.** Require the `verify` check on
+  `hostinger-demo` so nothing reaches Hostinger without a green build.
 
 ### 1. Point the subdomain at the hosting account
 
@@ -48,7 +61,7 @@ hPanel → **Websites → Node.js** (Business/Cloud plans) → create an app:
 | Setting | Value |
 | --- | --- |
 | Repository | `TheCarvas/openid4vp-interactive-demo` |
-| Branch | `main` |
+| Branch | `hostinger-demo` |
 | Node version | 22 (or 20; must be >= 20.19) |
 | Install command | `npm ci` |
 | Build command | `npm run build` |
@@ -78,19 +91,19 @@ Do not set `PORT` to a fixed value if hPanel injects one; the server reads
 
 ### 4. Enable automatic deployment
 
-Turn on auto-deploy (or "deploy on push") for the `main` branch in the app's
-Git settings. If your panel offers a webhook URL instead, add it under the
+Turn on auto-deploy (or "deploy on push") for the `hostinger-demo` branch in the
+app's Git settings. If your panel offers a webhook URL instead, add it under the
 repository's **Settings → Webhooks** with the `push` event.
 
-### 5. Protect `main`
+### 5. Protect `hostinger-demo`
 
-Repository **Settings → Branches → Add rule** for `main`:
+Repository **Settings → Branches → Add rule** for `hostinger-demo`:
 
 - Require a pull request before merging.
 - Require status checks to pass: **`verify`**.
 
-That is the whole loop: open a PR → CI verifies it → merge → Hostinger rebuilds
-and restarts → the change is live.
+That is the whole loop: open a PR into `hostinger-demo` → CI verifies it →
+merge → Hostinger rebuilds and restarts → the change is live.
 
 ### 6. Verify
 
