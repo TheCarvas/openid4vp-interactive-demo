@@ -11,10 +11,12 @@ export function createApp(options: {
   authService: AuthService;
   diagnostics?: DiagnosticTracer;
   staticDirectory?: string;
+  publicOrigin?: string;
 }): Express {
   const diagnostics = options.diagnostics ?? DiagnosticTracer.disabled();
   const app = express();
   app.set('trust proxy', true);
+  app.locals.publicOrigin = options.publicOrigin;
   app.use(express.json({ limit: '1mb' }));
 
   app.get('/api/health', (_req, res) => {
