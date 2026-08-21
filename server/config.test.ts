@@ -32,6 +32,20 @@ test('debug and artifact capture stay off unless explicitly enabled', () => {
   assert.equal(config.captureCredentialArtifacts, false);
 });
 
+test('the server binds loopback unless a bind host is set explicitly', () => {
+  assert.equal(loadConfig({}, projectRoot).bindHost, '127.0.0.1');
+  assert.equal(loadConfig({ BIND_HOST: '   ' }, projectRoot).bindHost, '127.0.0.1');
+});
+
+test('BIND_HOST opts into a wider bind, and takes precedence over HOST', () => {
+  assert.equal(loadConfig({ BIND_HOST: '0.0.0.0' }, projectRoot).bindHost, '0.0.0.0');
+  assert.equal(loadConfig({ HOST: '0.0.0.0' }, projectRoot).bindHost, '0.0.0.0');
+  assert.equal(
+    loadConfig({ BIND_HOST: '127.0.0.1', HOST: '0.0.0.0' }, projectRoot).bindHost,
+    '127.0.0.1',
+  );
+});
+
 test('PUBLIC_ORIGIN is normalized to a bare origin', () => {
   const config = loadConfig({ PUBLIC_ORIGIN: 'https://openid4vp.lionwolfstar.tech/demo' }, projectRoot);
   assert.equal(config.publicOrigin, 'https://openid4vp.lionwolfstar.tech');

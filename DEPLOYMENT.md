@@ -139,6 +139,18 @@ else.
 `/usr/local/bin/openid4vp-redeploy` clones the branch, builds on the box, swaps
 the artifacts in and restarts:
 
+`BIND_HOST` (alias: `HOST`) chooses the interface the server listens on, and
+defaults to `127.0.0.1`. Leave it unset behind any reverse proxy — including
+hPanel's and nginx on a VPS. The proxy terminates TLS and forwards to loopback,
+and a loopback bind is what keeps the app from *also* answering on its raw port
+over plaintext HTTP. That is not merely untidy here: the verifier binds each
+OpenID4VP flow to the browser's origin, so an app reachable on a second
+origin and scheme undermines the guarantee the flow rests on. Set
+`BIND_HOST=0.0.0.0` only where direct exposure is intended — a container whose
+port you publish deliberately, for instance. The startup log prints the address
+actually bound, and warns when it is not loopback.
+
+### 4. Enable automatic deployment
 ```bash
 ssh openid4vp@185.97.144.159 sudo openid4vp-redeploy
 ```
@@ -166,6 +178,33 @@ curl https://openid4vp.lionwolfstar.tech/api/health
 ssh root@185.97.144.159 "systemctl status openid4vp-demo --no-pager"
 ssh root@185.97.144.159 "journalctl -u openid4vp-demo -n 50 --no-pager"
 
+## Alternative: deploy from GitHub Actions over SSH
+
+Use this only if you want Actions to own the deployment — for example to build
+on a Node version the panel does not offer, or to deploy to a VPS.
+`.github/workflows/deploy-hostinger.yml` builds, ships `dist/`, `dist-server/`,
+`fixtures/`, and the manifests over rsync, installs production dependencies on
+the host, restarts, and health-checks the result.
+
+On a VPS you own the proxy, so this is where the bind address matters most:
+keep `BIND_HOST` unset so the app listens on `127.0.0.1`, point nginx or Apache
+at it, and confirm from off the host that `http://<server-ip>:3000/api/health`
+does *not* answer. A firewall rule dropping non-loopback traffic to the port is
+worth keeping as a second layer, but it should not be the only thing standing
+between the internet and the app.
+
+It is dormant until you set the repository variable
+`HOSTINGER_DEPLOY_ENABLED` to `true`. Configure under **Settings → Secrets and
+variables → Actions**:
+
+| Secret | Value |
+| --- | --- |
+| `HOSTINGER_SSH_HOST` | SSH hostname or IP from hPanel → Advanced → SSH Access |
+| `HOSTINGER_SSH_USER` | SSH username (e.g. `uXXXXXXXX`) |
+| `HOSTINGER_SSH_PORT` | SSH port (Hostinger shared hosting is usually not 22) |
+| `HOSTINGER_SSH_KEY` | Private key whose public half you added in hPanel |
+| `HOSTINGER_SSH_KNOWN_HOSTS` | Optional. Output of `ssh-keyscan -p <port> <host>`. Without it the workflow scans at deploy time, which trusts whatever answers. |
+| `HOSTINGER_APP_PATH` | Absolute path of the app directory on the host |
 # Certificate expiry, and a renewal rehearsal
 ssh root@185.97.144.159 "certbot certificates"
 ssh root@185.97.144.159 "certbot renew --dry-run"
