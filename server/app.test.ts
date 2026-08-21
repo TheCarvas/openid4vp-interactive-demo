@@ -10,8 +10,9 @@ import { createApp } from './app.js';
 import { AuthService } from './auth/service.js';
 import { TransactionStore } from './auth/transaction-store.js';
 import { DiagnosticTracer } from './diagnostics/diagnostic-tracer.js';
+import { mintSampleCredential } from './openid4vp/test-credential.js';
 
-test('sample endpoint verifies the fixture and reuses the normal signup/sign-in flow', async () => {
+test('sample endpoint verifies an uploaded credential and reuses the normal signup/sign-in flow', async () => {
   const dataRoot = await mkdtemp(join(tmpdir(), 'openid4vp-api-'));
   const accountsFile = join(dataRoot, 'accounts.json');
   const activityFile = join(dataRoot, 'activity.json');
@@ -31,9 +32,9 @@ test('sample endpoint verifies the fixture and reuses the normal signup/sign-in 
     activity: new FileActivityRepository(activityFile),
     flowTtlSeconds: 300,
     signupTtlSeconds: 600,
-    projectRoot: process.cwd(),
     diagnostics,
   });
+  const uploaded = await mintSampleCredential();
   const app = createApp({ authService: service, diagnostics });
   const server = app.listen(0, '127.0.0.1');
 
@@ -71,8 +72,14 @@ test('sample endpoint verifies the fixture and reuses the normal signup/sign-in 
     });
     assert.equal(rejectedByContract.status, 400);
 
+    const rejectedWithoutUpload = await post(baseUrl, '/api/auth/email/verify-sample', {
+      flow_id: prepared.body.flow_id,
+    });
+    assert.equal(rejectedWithoutUpload.status, 400);
+
     const verified = await post(baseUrl, '/api/auth/email/verify-sample', {
       flow_id: prepared.body.flow_id,
+      ...uploaded,
     }, firstTraceId);
     assert.equal(verified.status, 200);
     assert.equal(verified.body.status, 'profile_required');
@@ -97,6 +104,7 @@ test('sample endpoint verifies the fixture and reuses the normal signup/sign-in 
     }, secondTraceId);
     const signedIn = await post(baseUrl, '/api/auth/email/verify-sample', {
       flow_id: nextPrepared.body.flow_id,
+      ...uploaded,
     }, secondTraceId);
     assert.equal(signedIn.status, 200);
     assert.equal(signedIn.body.status, 'signed_in');
@@ -152,7 +160,6 @@ test('a configured public origin is the only origin a flow can be bound to', asy
     activity: new FileActivityRepository(join(dataRoot, 'activity.json')),
     flowTtlSeconds: 300,
     signupTtlSeconds: 600,
-    projectRoot: process.cwd(),
     diagnostics: DiagnosticTracer.disabled(),
   });
   const app = createApp({ authService: service, publicOrigin });

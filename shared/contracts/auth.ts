@@ -52,8 +52,41 @@ export const verifyCredentialRequestSchema = z.object({
 }).strict();
 export type VerifyCredentialRequest = z.infer<typeof verifyCredentialRequestSchema>;
 
+export const sampleCredentialIssuerJwkSchema = z.object({
+  alg: z.literal('EdDSA'),
+  crv: z.literal('Ed25519'),
+  key_ops: z.array(z.string()).refine(
+    (operations) => operations.includes('verify'),
+    'issuerJwk must allow verification',
+  ),
+  kty: z.literal('OKP'),
+  use: z.literal('sig'),
+  x: z.string().min(1),
+}).passthrough();
+
+export const sampleCredentialContextSchema = z.object({
+  nonce: z.string().min(1),
+  origin: z.string().url().refine(
+    (value) => new URL(value).origin === value,
+    'origin must be a normalized origin',
+  ),
+  validationTimeSeconds: z.number().int().positive(),
+  issuerJwk: sampleCredentialIssuerJwkSchema,
+}).strict();
+export type SampleCredentialContextInput = z.infer<typeof sampleCredentialContextSchema>;
+
+export const sampleCredentialResponseSchema = z.object({
+  protocol: z.literal('openid4vp-v1-unsigned'),
+  data: z.object({
+    vp_token: z.unknown(),
+  }).passthrough(),
+}).strict();
+export type SampleCredentialResponseInput = z.infer<typeof sampleCredentialResponseSchema>;
+
 export const verifySampleCredentialRequestSchema = z.object({
   flow_id: z.string().uuid(),
+  context: sampleCredentialContextSchema,
+  response: sampleCredentialResponseSchema,
 }).strict();
 export type VerifySampleCredentialRequest = z.infer<typeof verifySampleCredentialRequestSchema>;
 

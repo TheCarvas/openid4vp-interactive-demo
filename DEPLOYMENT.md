@@ -91,7 +91,7 @@ edge firewall's IPv6 coverage was never verified.
 ### Automatic, via GitHub Actions
 
 `.github/workflows/deploy-hostinger.yml` builds on a runner and ships the result
-over rsync: it uploads `dist/`, `dist-server/`, `fixtures/` and the manifests,
+over rsync: it uploads `dist/`, `dist-server/` and the manifests,
 runs `npm ci --omit=dev` on the host, restarts the service, and health-checks it.
 Building on the runner rather than on the VPS matters — KVM 1 has a single vCPU.
 
@@ -183,7 +183,7 @@ ssh root@185.97.144.159 "journalctl -u openid4vp-demo -n 50 --no-pager"
 Use this only if you want Actions to own the deployment — for example to build
 on a Node version the panel does not offer, or to deploy to a VPS.
 `.github/workflows/deploy-hostinger.yml` builds, ships `dist/`, `dist-server/`,
-`fixtures/`, and the manifests over rsync, installs production dependencies on
+and the manifests over rsync, installs production dependencies on
 the host, restarts, and health-checks the result.
 
 On a VPS you own the proxy, so this is where the bind address matters most:

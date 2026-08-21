@@ -1,4 +1,7 @@
 node_modules/
+# Captured sample credentials contain the credential subject's personal data.
+fixtures/
+*sample-credential*.json
 dist/
 dist-server/
 .env

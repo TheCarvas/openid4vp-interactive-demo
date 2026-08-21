@@ -11,10 +11,7 @@ import type { ActivityRepository } from '../activity/activity-repository.js';
 import type { SignupProfile, VerifiedClaims } from '../domain/types.js';
 import { BadRequestError, HttpError } from '../http/errors.js';
 import { buildOpenId4VpRequest } from '../openid4vp/request.js';
-import {
-  loadSampleCredentialFixtures,
-  type SampleCredentialFixtures,
-} from '../openid4vp/sample-fixtures.js';
+import type { SampleCredentialFixtures } from '../openid4vp/sample-fixtures.js';
 import {
   verifyOpenId4VpResponse,
   verifySampleOpenId4VpResponse,
@@ -29,23 +26,19 @@ export type AuthServiceOptions = {
   activity: ActivityRepository;
   flowTtlSeconds: number;
   signupTtlSeconds: number;
-  projectRoot: string;
   diagnostics?: DiagnosticTracer;
   verifyLive?: typeof verifyOpenId4VpResponse;
   verifySample?: typeof verifySampleOpenId4VpResponse;
-  loadSampleFixtures?: (projectRoot: string) => Promise<SampleCredentialFixtures>;
 };
 
 export class AuthService {
   private readonly verifyLive: typeof verifyOpenId4VpResponse;
   private readonly verifySample: typeof verifySampleOpenId4VpResponse;
-  private readonly loadSampleFixtures: (projectRoot: string) => Promise<SampleCredentialFixtures>;
   private readonly diagnostics: DiagnosticTracer;
 
   constructor(private readonly options: AuthServiceOptions) {
     this.verifyLive = options.verifyLive ?? verifyOpenId4VpResponse;
     this.verifySample = options.verifySample ?? verifySampleOpenId4VpResponse;
-    this.loadSampleFixtures = options.loadSampleFixtures ?? loadSampleCredentialFixtures;
     this.diagnostics = options.diagnostics ?? DiagnosticTracer.disabled();
   }
 
@@ -121,9 +114,12 @@ export class AuthService {
     });
   }
 
-  async verifySampleCredential(flowId: string, actualOrigin: string): Promise<VerifyResult> {
+  async verifySampleCredential(
+    flowId: string,
+    actualOrigin: string,
+    fixtures: SampleCredentialFixtures,
+  ): Promise<VerifyResult> {
     return this.verifyFlow(flowId, actualOrigin, 'sample', async (_nonce, _origin, traceId) => {
-      const fixtures = await this.loadSampleFixtures(this.options.projectRoot);
       await this.diagnostics.captureBackendArtifact(traceId, {
         name: 'openid4vp.sample_credential_context',
         mediaType: 'application/json',

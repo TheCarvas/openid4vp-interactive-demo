@@ -21,7 +21,6 @@ const authService = new AuthService({
   activity: new FileActivityRepository(config.activityFile),
   flowTtlSeconds: config.flowTtlSeconds,
   signupTtlSeconds: config.signupTtlSeconds,
-  projectRoot: config.projectRoot,
   diagnostics,
 });
 const app = createApp({
