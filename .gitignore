@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.env
+.data/*.json
+.data/diagnostic-traces/
+!.data/.gitkeep
+.codex/
+graphify-out/
+AGENTS.md
+*.log
+.DS_Store

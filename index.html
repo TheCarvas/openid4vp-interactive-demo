@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light" />
+    <title>OPENID4VP 1.0 Demo</title>
+  </head>
+  <body>
+    <main class="shell">
+      <section class="card" aria-labelledby="page-title">
+        <div class="eyebrow">Digital Credentials API · Verifiable presentations</div>
+        <h1 id="page-title">OPENID4VP 1.0 Demo</h1>
+        <p class="intro">Test an end-to-end OpenID for Verifiable Presentations (OpenID4VP) sign-in and claim-verification flow, including the relying-party user experience. This is the first release of the demo and currently supports one presentation scenario: a Google-verified email credential.</p>
+
+        <section class="test-config" aria-labelledby="test-config-title">
+          <div class="config-heading">
+            <div>
+              <div class="config-kicker">Test tooling</div>
+              <h2 id="test-config-title">Request configuration</h2>
+            </div>
+          </div>
+
+          <div class="protocol-control">
+            <div>
+              <span class="control-label">Verifier request type</span>
+              <span id="protocol-value" class="protocol-value">openid4vp-v1-unsigned</span>
+            </div>
+            <label class="protocol-toggle" for="signed-protocol">
+              <span>Unsigned</span>
+              <input id="signed-protocol" type="checkbox" role="switch" aria-describedby="protocol-notice" />
+              <span>Signed</span>
+            </label>
+          </div>
+          <div id="diagnostic-controls" class="diagnostic-controls hidden">
+            <label for="diagnostic-level">
+              <span class="control-label">Persistent diagnostics</span>
+              <select id="diagnostic-level">
+                <option value="off">Off</option>
+                <option value="info">Info</option>
+                <option value="debug">Debug</option>
+              </select>
+            </label>
+            <span id="diagnostic-capabilities" class="diagnostic-capabilities"></span>
+          </div>
+          <p id="protocol-notice" class="inline-message inline-warning hidden" role="alert">
+            Signed verifier requests are not supported yet. Using <code>openid4vp-v1-unsigned</code>.
+          </p>
+
+          <fieldset id="claim-selection" class="claim-selection">
+            <legend>Claims included in the DCQL query</legend>
+            <div class="claim-grid">
+              <label class="claim-option claim-required"><input type="checkbox" data-claim="email" checked disabled /><span>email <small>required</small></span></label>
+              <label class="claim-option claim-required"><input type="checkbox" data-claim="email_verified" checked disabled /><span>email_verified <small>required</small></span></label>
+              <label class="claim-option"><input type="checkbox" data-claim="name" /><span>name</span></label>
+              <label class="claim-option"><input type="checkbox" data-claim="given_name" /><span>given_name</span></label>
+              <label class="claim-option"><input type="checkbox" data-claim="family_name" /><span>family_name</span></label>
+              <label class="claim-option"><input type="checkbox" data-claim="picture" /><span>picture</span></label>
+              <label class="claim-option"><input type="checkbox" data-claim="hd" /><span>hd</span></label>
+            </div>
+          </fieldset>
+
+          <details class="request-preview">
+            <summary>Backend-generated request payload</summary>
+            <textarea id="request-json-preview" rows="16" spellcheck="false" readonly aria-describedby="request-json-help">The payload will be generated after sign-in starts.</textarea>
+            <p id="request-json-help" class="field-help">Read-only preview of the exact request returned by the backend.</p>
+          </details>
+        </section>
+
+        <section id="flow-progress" class="flow-progress hidden" aria-labelledby="flow-progress-title" aria-live="polite">
+          <div class="progress-heading">
+            <div>
+              <div class="config-kicker">OpenID4VP transaction</div>
+              <h2 id="flow-progress-title">Presentation progress</h2>
+            </div>
+            <span id="progress-count">0 of 6</span>
+          </div>
+          <ol class="progress-steps">
+            <li data-flow-step="request_preparation"><span class="step-marker"></span><div><strong>Authorization Request Preparation</strong><small>Backend creates the nonce-bound DCQL request.</small></div></li>
+            <li data-flow-step="wallet_invocation"><span class="step-marker"></span><div><strong>Wallet Invocation</strong><small>Browser sends the OpenID4VP request to a compatible wallet.</small></div></li>
+            <li data-flow-step="holder_consent"><span class="step-marker"></span><div><strong>Holder Selection &amp; Consent</strong><small>Waiting for credential selection and disclosure approval.</small></div></li>
+            <li data-flow-step="vp_token_received"><span class="step-marker"></span><div><strong>VP Token Received</strong><small>The browser returned an OpenID4VP authorization response.</small></div></li>
+            <li data-flow-step="presentation_verification"><span class="step-marker"></span><div><strong>Presentation Verification</strong><small>Backend parses and cryptographically verifies the presentation.</small></div></li>
+            <li data-flow-step="verification_complete"><span class="step-marker"></span><div><strong>Presentation Verified</strong><small>Credential, holder binding, nonce, audience, and claims are valid.</small></div></li>
+          </ol>
+        </section>
+
+        <div id="status" class="status status-ready">Choose the requested claims, then start sign-in.</div>
+
+        <button id="continue" class="primary" type="button" disabled>Sign in with OPENID4VP</button>
+        <button id="retry" class="secondary hidden" type="button">Prepare a new request</button>
+
+        <section id="sample-fallback" class="sample-fallback hidden" aria-labelledby="sample-fallback-title">
+          <div class="demo-badge">Demo fallback</div>
+          <h2 id="sample-fallback-title">No compatible wallet response?</h2>
+          <p>Use the server-controlled sample to exercise the same cryptographic verification and account flow. This is for development only.</p>
+          <button id="use-sample" class="sample-action" type="button">Use sample credential</button>
+        </section>
+
+        <section id="profile-panel" class="panel hidden" aria-labelledby="profile-title">
+          <h2 id="profile-title">Create your account</h2>
+          <p>We do not recognize this verified email. Review the profile details prefilled from the presentation, add any optional information, and confirm to create your account.</p>
+          <form id="profile-form">
+            <label>
+              Email
+              <div class="verified-field">
+                <input id="email" name="email" type="email" readonly />
+                <span>Verified</span>
+              </div>
+            </label>
+            <label>
+              <span class="field-label">Display name <span class="optional-label">Optional</span></span>
+              <input id="display-name" name="name" autocomplete="name" maxlength="150" />
+            </label>
+            <label>
+              <span class="field-label">First name <span class="optional-label">Optional</span></span>
+              <input id="given-name" name="givenName" autocomplete="given-name" maxlength="100" />
+            </label>
+            <label>
+              <span class="field-label">Last name <span class="optional-label">Optional</span></span>
+              <input id="family-name" name="familyName" autocomplete="family-name" maxlength="100" />
+            </label>
+            <label>
+              <span class="field-label">Profile picture URL <span class="optional-label">Optional</span></span>
+              <input id="picture" name="picture" type="url" autocomplete="url" />
+            </label>
+            <label id="hosted-domain-field" class="hidden">
+              Hosted domain
+              <div class="verified-field">
+                <input id="hosted-domain" name="hostedDomain" readonly />
+                <span>Presented</span>
+              </div>
+            </label>
+            <div class="optional-fields-heading">Additional profile information</div>
+            <label>
+              <span class="field-label">Job title <span class="optional-label">Optional</span></span>
+              <input id="job-title" name="jobTitle" autocomplete="organization-title" maxlength="120" />
+            </label>
+            <label>
+              <span class="field-label">Company <span class="optional-label">Optional</span></span>
+              <input id="company" name="company" autocomplete="organization" maxlength="150" />
+            </label>
+            <button class="primary" type="submit">Complete sign-up</button>
+          </form>
+        </section>
+
+        <section id="success-panel" class="panel success hidden" aria-live="polite">
+          <div class="success-icon">✓</div>
+          <h2 id="success-title">Signed in</h2>
+          <p id="welcome-message" class="welcome-message"></p>
+          <div id="account-card" class="account-card"></div>
+          <button id="activity-toggle" class="secondary hidden" type="button" aria-expanded="false" aria-controls="activity-report">View your OPENID4VP sign-in activity</button>
+          <section id="activity-report" class="activity-report hidden" aria-labelledby="activity-title">
+            <div class="activity-heading">
+              <h3 id="activity-title">OPENID4VP sign-in activity</h3>
+              <span id="activity-count"></span>
+            </div>
+            <ol id="activity-list" class="activity-list"></ol>
+          </section>
+        </section>
+
+        <details id="diagnostic-panel" class="debug hidden">
+          <summary>Persistent test diagnostics</summary>
+          <div class="diagnostic-toolbar">
+            <span id="diagnostic-trace-id">No active trace</span>
+            <button id="diagnostic-refresh" class="compact-button" type="button">Refresh trace</button>
+          </div>
+          <pre id="debug-output">No response yet.</pre>
+        </details>
+      </section>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
