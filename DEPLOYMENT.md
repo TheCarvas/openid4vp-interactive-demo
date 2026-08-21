@@ -1,148 +1,183 @@
 # Deploying to Hostinger
 
-Target: `https://openid4vp.lionwolfstar.tech`, deployed automatically when a
-pull request merges into `hostinger-demo`.
+Live at `https://openid4vp.lionwolfstar.tech`, served from a Hostinger **VPS**.
+
+> **This document was rewritten to match what is actually deployed.** An earlier
+> version described an hPanel Node.js app on Business shared hosting. That is not
+> what runs, and it is not reachable from this account — see
+> [Why a VPS](#why-a-vps-and-not-shared-hosting).
 
 ## Branches
 
-`main` is the trunk. `hostinger-demo` is the release branch, and it is the only
-branch Hostinger watches — merging into it is what deploys.
+`main` is the trunk. `hostinger-demo` is the release branch — merging into it is
+what deploys.
 
-Keeping deployment on its own branch means work can land on `main` without
-going live, and the demo can be pinned to a known-good commit while `main`
-moves. The cost is that the two branches drift, so treat a release as an
-explicit step: open a pull request from `main` (or from a feature branch) into
-`hostinger-demo` when you want the site updated. CI runs on every pull request
-regardless of which branch it targets.
+Keeping deployment on its own branch means work can land on `main` without going
+live, and the demo can be pinned to a known-good commit while `main` moves. The
+cost is that the two branches drift, so treat a release as an explicit step: open
+a pull request from `main` (or from a feature branch) into `hostinger-demo` when
+you want the site updated. CI runs on every pull request regardless of target.
 
 ## What this app needs from a host
 
 This is not a static site. It is an Express server that verifies OpenID4VP
 credential presentations and serves the built client from the same origin:
 
-- **A persistent Node process** (Node >= 20.19). Hostinger runs Node apps on
-  **Business** and **Cloud** plans only; Premium and Single do not.
+- **A persistent Node process** (Node >= 20.19).
 - **HTTPS.** The browser Digital Credentials API and the `secure` session cookie
   both require it.
-- **Writable storage** for `accounts.json`, `activity.json`, and diagnostic
-  traces.
+- **Writable storage** for `accounts.json`, `activity.json`, and diagnostic traces.
 - **Same origin for the page and the API.** The client calls `/api/...`
   relatively, and the verifier binds each flow to the browser's origin, which
   becomes the audience the wallet signs over. Splitting the frontend and API
-  across hosts breaks verification — do not serve the UI from static hosting and
-  the API from somewhere else.
+  across hosts breaks verification.
 
-If your plan turns out to be Premium rather than Business, upgrading to Business
-is the smallest change; a Hostinger VPS also works but you manage nginx,
-certificates, and the service unit yourself.
+## Why a VPS, and not shared hosting
 
-## Recommended setup
+Hostinger runs Node.js apps on **Business** and **Cloud** plans only. This
+account's sole hosting order is **Premium**, which is PHP-only, and the Hostinger
+billing API exposes no shared-hosting plans at all — so there is no programmatic
+upgrade path either. A VPS was provisioned instead.
 
-Hostinger's Node.js app deploys from a GitHub repository and rebuilds on push,
-so the automation you asked for needs no deployment secrets at all:
+The trade-off worth knowing: **Hostinger does not manage TLS certificates on a
+VPS.** Free auto-renewing SSL is a managed shared-hosting feature. On a VPS you
+own nginx, the certificate, and the service unit. This setup uses certbot, which
+automates issuance and renewal — but it is yours to keep working.
 
-- **GitHub Actions is the gate.** `.github/workflows/ci.yml` runs the type check,
-  the test suite, a full build, and boots the compiled server with production
-  dependencies only on every pull request.
-- **Hostinger is the deployer.** It watches `hostinger-demo` and redeploys on
-  merge.
-- **Branch protection connects the two.** Require the `verify` check on
-  `hostinger-demo` so nothing reaches Hostinger without a green build.
+## The deployed topology
 
-### 1. Point the subdomain at the hosting account
-
-In hPanel, create the subdomain `openid4vp` under `lionwolfstar.tech`, then
-issue the free SSL certificate for it (SSL → install for the subdomain).
-
-### 2. Create the Node.js app
-
-hPanel → **Websites → Node.js** (Business/Cloud plans) → create an app:
-
-| Setting | Value |
+| Thing | Value |
 | --- | --- |
-| Repository | `TheCarvas/openid4vp-interactive-demo` |
-| Branch | `hostinger-demo` |
-| Node version | 22 (or 20; must be >= 20.19) |
-| Install command | `npm ci` |
-| Build command | `npm run build` |
-| Start command | `npm start` |
-| Domain | `openid4vp.lionwolfstar.tech` |
+| VPS | `srv1921389.hstgr.cloud` (id `1921389`), KVM 1, Ubuntu 24.04 LTS |
+| IPv4 | `185.97.144.159` |
+| DNS | `openid4vp` A record in the `lionwolfstar.tech` zone, TTL 300 |
+| Node | 22.x, from NodeSource |
+| App directory | `/srv/openid4vp/app` |
+| Data directory | `/srv/openid4vp/data` |
+| Environment file | `/etc/openid4vp-demo.env` (`0640`, `root:openid4vp`) |
+| Service | `openid4vp-demo.service`, running as user `openid4vp` |
+| Reverse proxy | nginx, `/etc/nginx/sites-available/openid4vp` |
+| TLS | Let's Encrypt via certbot, auto-renewed by `certbot.timer` |
+| Firewall | Hostinger firewall group `openid4vp-web` — TCP 22, 80, 443 only |
 
-`npm run build` produces both halves of the release: `vite build` writes the
-client into `dist/`, and `tsc -p tsconfig.server.json` compiles the server into
-`dist-server/`. `npm start` then runs `node dist-server/server/index.js`, which
-needs no dev dependencies — this matters because the host installs production
-dependencies only.
+`DATA_DIR` deliberately sits **outside** the application directory. A deploy
+replaces the contents of `/srv/openid4vp/app`, so a datastore left at the default
+`./.data` would be erased on every release.
 
-### 3. Set the environment variables
+### A note on the listening address
 
-Copy them from [`.env.production.example`](.env.production.example) into the
-app's environment settings. Two are not optional:
+`server/index.ts` calls `app.listen(config.port, '0.0.0.0')`, so the app binds
+every interface even though it logs `http://127.0.0.1:...`. Behind a reverse
+proxy that means the app is also reachable directly on port 3000 over plaintext
+HTTP, bypassing TLS — which matters here, because the verifier binds each flow to
+the browser's origin.
 
-- `PUBLIC_ORIGIN=https://openid4vp.lionwolfstar.tech` — pins the origin a flow
-  can be bound to. Without it the app trusts `X-Forwarded-Host` from the
-  hosting proxy to decide the OpenID4VP audience.
-- `DATA_DIR=/home/uXXXXXXXX/openid4vp-demo-data` — a directory **outside** the
-  application directory. A git-based redeploy replaces the app directory, so a
-  datastore left at the default `./.data` is erased on every merge.
+Two things block that on this host:
 
-Do not set `PORT` to a fixed value if hPanel injects one; the server reads
-`process.env.PORT` and falls back to 3000.
+1. The Hostinger firewall group, which permits only 22/80/443. Note it is enforced
+   **upstream** of the VM — the guest's own `iptables` `INPUT` policy remains
+   `ACCEPT`, so you cannot confirm it from inside the machine.
+2. `/etc/nftables-o4vp.conf`, applied at boot by the `o4vp-guard` service, which
+   drops non-loopback traffic to port 3000 on both IPv4 and IPv6.
 
-### 4. Enable automatic deployment
+The real fix is to make the bind address configurable and default it to
+loopback. Until then, do not remove either guard.
 
-Turn on auto-deploy (or "deploy on push") for the `hostinger-demo` branch in the
-app's Git settings. If your panel offers a webhook URL instead, add it under the
-repository's **Settings → Webhooks** with the `push` event.
+IPv6 is intentionally **not** published — there is no `AAAA` record — because the
+edge firewall's IPv6 coverage was never verified.
 
-### 5. Protect `hostinger-demo`
+## Deploying
+
+### Automatic, via GitHub Actions
+
+`.github/workflows/deploy-hostinger.yml` builds on a runner and ships the result
+over rsync: it uploads `dist/`, `dist-server/`, `fixtures/` and the manifests,
+runs `npm ci --omit=dev` on the host, restarts the service, and health-checks it.
+Building on the runner rather than on the VPS matters — KVM 1 has a single vCPU.
+
+It stays dormant until `HOSTINGER_DEPLOY_ENABLED` is `true`. Configure under
+**Settings → Secrets and variables → Actions**:
+
+| Secret | Value |
+| --- | --- |
+| `HOSTINGER_SSH_HOST` | `185.97.144.159` |
+| `HOSTINGER_SSH_USER` | `openid4vp` |
+| `HOSTINGER_SSH_PORT` | `22` |
+| `HOSTINGER_SSH_KEY` | Private half of the `openid4vp-demo-deploy` keypair |
+| `HOSTINGER_SSH_KNOWN_HOSTS` | Output of `ssh-keyscan -p 22 185.97.144.159` |
+| `HOSTINGER_APP_PATH` | `/srv/openid4vp/app` |
+
+| Variable | Value |
+| --- | --- |
+| `HOSTINGER_DEPLOY_ENABLED` | `true` |
+| `HOSTINGER_RESTART_COMMAND` | `sudo systemctl restart openid4vp-demo` |
+| `HOSTINGER_HEALTH_URL` | `https://openid4vp.lionwolfstar.tech/api/health` |
+
+The deploy user is unprivileged. Its sudo rights are limited by
+`/etc/sudoers.d/openid4vp-demo` to restarting and querying this one service — it
+cannot run anything else as root.
+
+Setting them, from a machine holding the private key:
+
+```bash
+gh secret set HOSTINGER_SSH_HOST --body "185.97.144.159"
+gh secret set HOSTINGER_SSH_USER --body "openid4vp"
+gh secret set HOSTINGER_SSH_PORT --body "22"
+gh secret set HOSTINGER_APP_PATH --body "/srv/openid4vp/app"
+gh secret set HOSTINGER_SSH_KEY < ~/.ssh/openid4vp_hostinger_ed25519
+ssh-keyscan -p 22 185.97.144.159 2>/dev/null | gh secret set HOSTINGER_SSH_KNOWN_HOSTS
+gh variable set HOSTINGER_RESTART_COMMAND --body "sudo systemctl restart openid4vp-demo"
+gh variable set HOSTINGER_HEALTH_URL --body "https://openid4vp.lionwolfstar.tech/api/health"
+gh variable set HOSTINGER_DEPLOY_ENABLED --body "true"
+```
+
+Set `HOSTINGER_DEPLOY_ENABLED` **last** — it is the switch that arms everything
+else.
+
+### Manual, over SSH
+
+`/usr/local/bin/openid4vp-redeploy` clones the branch, builds on the box, swaps
+the artifacts in and restarts:
+
+```bash
+ssh openid4vp@185.97.144.159 sudo openid4vp-redeploy
+```
+
+Use this for recovery, or when you want to deploy without a merge. Do not run it
+concurrently with an Actions deploy.
+
+## Protecting the release branch
 
 Repository **Settings → Branches → Add rule** for `hostinger-demo`:
 
 - Require a pull request before merging.
 - Require status checks to pass: **`verify`**.
 
-That is the whole loop: open a PR into `hostinger-demo` → CI verifies it →
-merge → Hostinger rebuilds and restarts → the change is live.
+That closes the loop: open a PR into `hostinger-demo` → CI verifies → merge →
+Actions deploys → the health check confirms it is serving.
 
-### 6. Verify
+## Operating it
 
 ```bash
+# Is it up?
 curl https://openid4vp.lionwolfstar.tech/api/health
+
+# Service state and recent logs
+ssh root@185.97.144.159 "systemctl status openid4vp-demo --no-pager"
+ssh root@185.97.144.159 "journalctl -u openid4vp-demo -n 50 --no-pager"
+
+# Certificate expiry, and a renewal rehearsal
+ssh root@185.97.144.159 "certbot certificates"
+ssh root@185.97.144.159 "certbot renew --dry-run"
 ```
 
-Then open the site in Chrome on an Android device with a wallet holding a
-verified email credential and run the sign-in flow.
+The ACME account was registered **without an email address**, so no expiry
+warnings are sent anywhere. Renewal is automated by `certbot.timer` and the
+dry-run passes, but there is no human fallback if it silently stops. To add one:
 
-## Alternative: deploy from GitHub Actions over SSH
-
-Use this only if you want Actions to own the deployment — for example to build
-on a Node version the panel does not offer, or to deploy to a VPS.
-`.github/workflows/deploy-hostinger.yml` builds, ships `dist/`, `dist-server/`,
-`fixtures/`, and the manifests over rsync, installs production dependencies on
-the host, restarts, and health-checks the result.
-
-It is dormant until you set the repository variable
-`HOSTINGER_DEPLOY_ENABLED` to `true`. Configure under **Settings → Secrets and
-variables → Actions**:
-
-| Secret | Value |
-| --- | --- |
-| `HOSTINGER_SSH_HOST` | SSH hostname or IP from hPanel → Advanced → SSH Access |
-| `HOSTINGER_SSH_USER` | SSH username (e.g. `uXXXXXXXX`) |
-| `HOSTINGER_SSH_PORT` | SSH port (Hostinger shared hosting is usually not 22) |
-| `HOSTINGER_SSH_KEY` | Private key whose public half you added in hPanel |
-| `HOSTINGER_SSH_KNOWN_HOSTS` | Optional. Output of `ssh-keyscan -p <port> <host>`. Without it the workflow scans at deploy time, which trusts whatever answers. |
-| `HOSTINGER_APP_PATH` | Absolute path of the app directory on the host |
-
-| Variable | Value |
-| --- | --- |
-| `HOSTINGER_DEPLOY_ENABLED` | `true` |
-| `HOSTINGER_RESTART_COMMAND` | Restart command for your host. Defaults to `touch tmp/restart.txt` (Passenger). On a VPS use e.g. `sudo systemctl restart openid4vp-demo`. |
-| `HOSTINGER_HEALTH_URL` | `https://openid4vp.lionwolfstar.tech/api/health` |
-
-Both workflows can coexist, but do not enable this one *and* hPanel auto-deploy
-on the same branch — they will race and restart the app twice per merge.
+```bash
+ssh root@185.97.144.159 "certbot update_account --email you@example.com"
+```
 
 ## Before you make it public
 
@@ -150,21 +185,21 @@ Two things about this demo change character once it is on the open internet:
 
 - **It stores real personal data.** A successful sign-in writes a real, verified
   email address and profile into `accounts.json`, and sign-in activity into
-  `activity.json`. There is no admin authentication in front of that data, and
-  no deletion path. Keep `DATA_DIR` outside the web root, and decide whether a
-  public demo should retain it at all.
+  `activity.json`. There is no admin authentication in front of that data, and no
+  deletion path. `DATA_DIR` is outside the web root, but decide whether a public
+  demo should retain it at all.
 - **`CAPTURE_CREDENTIAL_ARTIFACTS=true` writes presented credentials to disk**,
-  including the raw SD-JWT and its disclosures. `.env.example` enables it for
-  local development. It must stay `false` in production, along with
-  `DEBUG_UI_ENABLED`, which exposes verifier internals in API responses.
+  including the raw SD-JWT and its disclosures. It is `false` in production,
+  alongside `DEBUG_UI_ENABLED`, which exposes verifier internals in API
+  responses. Both must stay off.
 
-The sample-credential fallback is a development aid and is not authentication;
-it remains available in the deployed app whenever a live presentation cannot be
+The sample-credential fallback is a development aid and is not authentication; it
+remains available in the deployed app whenever a live presentation cannot be
 captured.
 
 ## Local development
 
-Unchanged, other than the dev server entry point:
+Unchanged:
 
 ```bash
 npm install
