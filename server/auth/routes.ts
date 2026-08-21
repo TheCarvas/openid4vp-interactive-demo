@@ -9,6 +9,7 @@ import {
 } from '../../shared/contracts/auth.js';
 import { diagnosticLevelSchema, type DiagnosticLevel } from '../../shared/contracts/diagnostics.js';
 import type { DiagnosticTracer } from '../diagnostics/diagnostic-tracer.js';
+import { parseSampleCredentialFixtures } from '../openid4vp/sample-fixtures.js';
 import { requestOrigin } from '../http/origin.js';
 import { setDemoSessionCookie } from '../http/session.js';
 import type { AuthService } from './service.js';
@@ -35,7 +36,12 @@ export function createAuthRouter(options: { service: AuthService; diagnostics: D
   router.post('/verify-sample', asyncHandler(async (req, res) => {
     res.locals.traceId = requestedTraceId(req);
     const input = verifySampleCredentialRequestSchema.parse(req.body);
-    const result = await options.service.verifySampleCredential(input.flow_id, requestOrigin(req));
+    const fixtures = parseSampleCredentialFixtures(input);
+    const result = await options.service.verifySampleCredential(
+      input.flow_id,
+      requestOrigin(req),
+      fixtures,
+    );
     res.locals.traceId = result.trace_id ?? res.locals.traceId;
     sendVerificationResult(res, result, requestDebugEnabled(req, options.diagnostics));
   }));

@@ -3,6 +3,8 @@ import type { ZodType } from 'zod';
 import {
   completeSignupResponseSchema,
   prepareAuthResponseSchema,
+  sampleCredentialContextSchema,
+  sampleCredentialResponseSchema,
   verifyResultSchema,
   type AccountDto as Account,
   type BackendAuthRequest,
@@ -10,6 +12,8 @@ import {
   type CredentialSource,
   type DigitalCredentialsRequest,
   type OpenId4VpRequestProtocol,
+  type SampleCredentialContextInput,
+  type SampleCredentialResponseInput,
   type SignInActivityDto as SignInActivity,
   type VerifyResult,
 } from '../shared/contracts/auth.js';
@@ -23,6 +27,10 @@ import {
   type DiagnosticLevel,
 } from '../shared/contracts/diagnostics.js';
 import { shouldOfferSampleCredential } from './fallback-policy.js';
+
+const MAX_SAMPLE_UPLOAD_BYTES = 64 * 1024;
+const SAMPLE_CONTEXT_HINT = 'Expected: nonce, origin, validationTimeSeconds, issuerJwk.';
+const SAMPLE_RESPONSE_HINT = 'Expected: protocol and data.vp_token from the captured presentation.';
 
 const AVAILABLE_CLAIMS: readonly ClaimName[] = [
   'email',
@@ -60,6 +68,10 @@ const continueButton = document.querySelector<HTMLButtonElement>('#continue')!;
 const retryButton = document.querySelector<HTMLButtonElement>('#retry')!;
 const sampleFallbackPanel = document.querySelector<HTMLElement>('#sample-fallback')!;
 const sampleCredentialButton = document.querySelector<HTMLButtonElement>('#use-sample')!;
+const sampleContextInput = document.querySelector<HTMLInputElement>('#sample-context-file')!;
+const sampleResponseInput = document.querySelector<HTMLInputElement>('#sample-response-file')!;
+const sampleContextStatus = document.querySelector<HTMLElement>('#sample-context-status')!;
+const sampleResponseStatus = document.querySelector<HTMLElement>('#sample-response-status')!;
 const claimSelection = document.querySelector<HTMLFieldSetElement>('#claim-selection')!;
 const claimInputs = Array.from(document.querySelectorAll<HTMLInputElement>('input[data-claim]'));
 const signedProtocolInput = document.querySelector<HTMLInputElement>('#signed-protocol')!;
@@ -106,6 +118,8 @@ let signupToken: string | null = null;
 let browserApiAvailable = false;
 let browserSupportReason: string | undefined;
 let credentialRequestRejected = false;
+let sampleContext: SampleCredentialContextInput | null = null;
+let sampleResponse: SampleCredentialResponseInput | null = null;
 let diagnosticCapabilities: DiagnosticCapabilities = {
   debugUiEnabled: false,
   captureCredentialArtifacts: false,
@@ -372,12 +386,72 @@ function refreshSampleFallback() {
     credentialRequestRejected,
   });
   sampleFallbackPanel.classList.toggle('hidden', !visible);
-  if (visible) sampleCredentialButton.disabled = false;
+  if (visible) refreshSampleCredentialButton();
 }
 
 function hideSampleFallback() {
   sampleFallbackPanel.classList.add('hidden');
-  sampleCredentialButton.disabled = false;
+  clearSampleUploads();
+}
+
+function refreshSampleCredentialButton() {
+  sampleCredentialButton.disabled = sampleContext === null || sampleResponse === null;
+}
+
+/** Drops the uploaded credential from memory so it never outlives the attempt that used it. */
+function clearSampleUploads() {
+  sampleContext = null;
+  sampleResponse = null;
+  sampleContextInput.value = '';
+  sampleResponseInput.value = '';
+  setUploadStatus(sampleContextStatus, SAMPLE_CONTEXT_HINT, 'hint');
+  setUploadStatus(sampleResponseStatus, SAMPLE_RESPONSE_HINT, 'hint');
+  refreshSampleCredentialButton();
+}
+
+function setUploadStatus(element: HTMLElement, message: string, kind: 'hint' | 'ready' | 'error') {
+  element.textContent = message;
+  element.className = `sample-upload-status is-${kind}`;
+}
+
+async function readSampleUpload<T>(
+  input: HTMLInputElement,
+  status: HTMLElement,
+  schema: ZodType<T>,
+  hint: string,
+): Promise<T | null> {
+  const file = input.files?.[0];
+  if (!file) {
+    setUploadStatus(status, hint, 'hint');
+    return null;
+  }
+  if (file.size > MAX_SAMPLE_UPLOAD_BYTES) {
+    setUploadStatus(status, `${file.name} is larger than ${MAX_SAMPLE_UPLOAD_BYTES / 1024} KB.`, 'error');
+    return null;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await file.text()) as unknown;
+  } catch {
+    setUploadStatus(status, `${file.name} is not valid JSON.`, 'error');
+    return null;
+  }
+
+  const validated = schema.safeParse(parsed);
+  if (!validated.success) {
+    const [issue] = validated.error.issues;
+    const path = issue?.path.join('.');
+    setUploadStatus(
+      status,
+      `${file.name} does not match the expected shape${path ? ` (${path}: ${issue.message})` : ''}.`,
+      'error',
+    );
+    return null;
+  }
+
+  setUploadStatus(status, `${file.name} loaded.`, 'ready');
+  return validated.data;
 }
 
 function browserAllowsProtocol(protocol: string): boolean {
@@ -559,18 +633,24 @@ async function invokeSampleCredential() {
     retryButton.classList.remove('hidden');
     return;
   }
+  const context = sampleContext;
+  const response = sampleResponse;
+  if (!context || !response) {
+    setStatus('Upload both the sample context and response files before using the sample credential.', 'error');
+    return;
+  }
 
   sampleCredentialButton.disabled = true;
   diagnosticLevelSelect.disabled = Boolean(activeTraceId);
   if (activeTraceId) startTracePolling();
   continueButton.disabled = true;
   resetFlowProgress();
-  setFlowStep('request_preparation', 'complete', 'Using the existing backend transaction and sample fixture.');
+  setFlowStep('request_preparation', 'complete', 'Using the existing backend transaction and the uploaded sample.');
   setFlowStep('wallet_invocation', 'complete', 'Browser wallet invocation bypassed by the explicit demo fallback.');
   setFlowStep('holder_consent', 'complete', 'The user explicitly selected the sample credential fallback.');
-  setFlowStep('vp_token_received', 'complete', 'The backend loaded the server-controlled sample VP token.');
+  setFlowStep('vp_token_received', 'complete', 'The uploaded sample VP token was submitted to the backend.');
   setFlowStep('presentation_verification', 'active');
-  setStatus('Loading and cryptographically verifying the server-controlled sample credential…', 'pending');
+  setStatus('Cryptographically verifying the uploaded sample credential…', 'pending');
   writeDebug({
     stage: 'sample_verification_started',
     credential_source: 'sample',
@@ -580,6 +660,8 @@ async function invokeSampleCredential() {
   try {
     const result = await api('/api/auth/email/verify-sample', verifyResultSchema, {
       flow_id: authRequest.flow_id,
+      context,
+      response,
     });
     setFlowStep('presentation_verification', 'complete');
     setFlowStep('verification_complete', 'complete');
@@ -592,7 +674,7 @@ async function invokeSampleCredential() {
       credential_source: 'sample',
       result: error instanceof ApiError ? error.result : { error: extractError(error) },
     });
-    sampleCredentialButton.disabled = false;
+    refreshSampleCredentialButton();
     restoreSignInControls();
   }
 }
@@ -798,6 +880,30 @@ diagnosticRefreshButton.addEventListener('click', () => {
 
 continueButton.addEventListener('click', () => {
   void invokeDigitalCredential();
+});
+
+sampleContextInput.addEventListener('change', () => {
+  void (async () => {
+    sampleContext = await readSampleUpload(
+      sampleContextInput,
+      sampleContextStatus,
+      sampleCredentialContextSchema,
+      SAMPLE_CONTEXT_HINT,
+    );
+    refreshSampleCredentialButton();
+  })();
+});
+
+sampleResponseInput.addEventListener('change', () => {
+  void (async () => {
+    sampleResponse = await readSampleUpload(
+      sampleResponseInput,
+      sampleResponseStatus,
+      sampleCredentialResponseSchema,
+      SAMPLE_RESPONSE_HINT,
+    );
+    refreshSampleCredentialButton();
+  })();
 });
 
 sampleCredentialButton.addEventListener('click', () => {

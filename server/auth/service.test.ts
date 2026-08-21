@@ -17,6 +17,9 @@ const claims: VerifiedClaims = {
   vct: 'UserInfoCredential',
 };
 
+/** The route validates uploads before the service sees them, so the service stub can be inert. */
+const uploadedFixtures = { context: {} as never, response: {} as never };
+
 const requestOptions: PrepareAuthRequest = {
   protocol: 'openid4vp-v1-unsigned',
   claims: ['email', 'email_verified'],
@@ -28,7 +31,7 @@ test('live and sample verification enter the same profile-required account branc
     const request = await service.prepare('https://verifier.example', requestOptions);
     const result = source === 'live'
       ? await service.verifyLiveCredential(request.flow_id, {}, 'https://verifier.example')
-      : await service.verifySampleCredential(request.flow_id, 'https://verifier.example');
+      : await service.verifySampleCredential(request.flow_id, 'https://verifier.example', uploadedFixtures);
 
     assert.equal(result.status, 'profile_required');
     assert.equal(result.source, source);
@@ -42,7 +45,7 @@ test('sample verification supports signup and subsequent existing-account sign-i
   const service = createService(accounts, activity);
 
   const firstRequest = await service.prepare('https://verifier.example', requestOptions);
-  const firstResult = await service.verifySampleCredential(firstRequest.flow_id, 'https://verifier.example');
+  const firstResult = await service.verifySampleCredential(firstRequest.flow_id, 'https://verifier.example', uploadedFixtures);
   assert.equal(firstResult.status, 'profile_required');
   const signup = await service.completeSignup(firstResult.signup_token, {
     name: 'Edited Name',
@@ -58,7 +61,7 @@ test('sample verification supports signup and subsequent existing-account sign-i
   const firstSignInAt = signup.account.lastSignInAt;
 
   const secondRequest = await service.prepare('https://verifier.example', requestOptions);
-  const secondResult = await service.verifySampleCredential(secondRequest.flow_id, 'https://verifier.example');
+  const secondResult = await service.verifySampleCredential(secondRequest.flow_id, 'https://verifier.example', uploadedFixtures);
   assert.equal(secondResult.status, 'signed_in');
   assert.equal(secondResult.source, 'sample');
   assert.equal(secondResult.account.id, signup.account.id);
@@ -74,12 +77,12 @@ test('a post-verification persistence failure does not consume the authenticatio
   accounts.failFind = true;
 
   await assert.rejects(
-    service.verifySampleCredential(request.flow_id, 'https://verifier.example'),
+    service.verifySampleCredential(request.flow_id, 'https://verifier.example', uploadedFixtures),
     /Account datastore unavailable/,
   );
 
   accounts.failFind = false;
-  const retried = await service.verifySampleCredential(request.flow_id, 'https://verifier.example');
+  const retried = await service.verifySampleCredential(request.flow_id, 'https://verifier.example', uploadedFixtures);
   assert.equal(retried.status, 'profile_required');
 });
 
@@ -93,8 +96,6 @@ function createService(
     activity,
     flowTtlSeconds: 300,
     signupTtlSeconds: 600,
-    projectRoot: process.cwd(),
-    loadSampleFixtures: async () => ({ context: {} as never, response: {} as never }),
     verifyLive: async () => ({ claims, debug: { source: 'live' } as never }),
     verifySample: async () => ({ claims, debug: { source: 'sample' } as never }),
   });

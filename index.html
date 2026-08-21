@@ -93,8 +93,21 @@
         <section id="sample-fallback" class="sample-fallback hidden" aria-labelledby="sample-fallback-title">
           <div class="demo-badge">Demo fallback</div>
           <h2 id="sample-fallback-title">No compatible wallet response?</h2>
-          <p>Use the server-controlled sample to exercise the same cryptographic verification and account flow. This is for development only.</p>
-          <button id="use-sample" class="sample-action" type="button">Use sample credential</button>
+          <p>Upload your own captured sample credential to exercise the same cryptographic verification and account flow. Both files stay in this request &mdash; the server never stores a sample credential of its own. This is for development only.</p>
+          <div class="sample-uploads">
+            <label class="sample-upload">
+              <span class="field-label">Context file <span class="required-label">Required</span></span>
+              <input id="sample-context-file" type="file" accept="application/json,.json" aria-describedby="sample-context-status" />
+              <small id="sample-context-status" class="sample-upload-status" role="status">Expected: nonce, origin, validationTimeSeconds, issuerJwk.</small>
+            </label>
+            <label class="sample-upload">
+              <span class="field-label">Response file <span class="required-label">Required</span></span>
+              <input id="sample-response-file" type="file" accept="application/json,.json" aria-describedby="sample-response-status" />
+              <small id="sample-response-status" class="sample-upload-status" role="status">Expected: protocol and data.vp_token from the captured presentation.</small>
+            </label>
+          </div>
+          <p class="sample-warning">These files contain the credential subject&rsquo;s personal data. Only upload a credential you are authorized to use, and never commit one to this repository.</p>
+          <button id="use-sample" class="sample-action" type="button" disabled>Use sample credential</button>
         </section>
 
         <section id="profile-panel" class="panel hidden" aria-labelledby="profile-title">
