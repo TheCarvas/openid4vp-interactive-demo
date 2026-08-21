@@ -26,10 +26,13 @@ const app = createApp({
   authService,
   diagnostics,
   staticDirectory: config.staticDirectory,
+  publicOrigin: config.publicOrigin,
 });
 
 app.listen(config.port, '0.0.0.0', () => {
   console.log(`OpenID4VP verified-email API listening on http://127.0.0.1:${config.port}`);
+  console.log(`Public origin: ${config.publicOrigin ?? 'derived per request'}`);
+  console.log(`Data directory: ${config.dataDirectory}`);
   console.log(`Google VC issuer: ${process.env.GOOGLE_VC_ISSUER ?? 'https://verifiablecredentials-pa.googleapis.com'}`);
   console.log(`Test diagnostics: ${config.debugUiEnabled ? 'enabled' : 'disabled'}; credential artifacts: ${config.captureCredentialArtifacts ? 'enabled' : 'disabled'}`);
 });
