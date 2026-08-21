@@ -2,6 +2,7 @@ import { isAbsolute, resolve } from 'node:path';
 
 export type AppConfig = {
   port: number;
+  bindHost: string;
   flowTtlSeconds: number;
   signupTtlSeconds: number;
   debugUiEnabled: boolean;
@@ -22,6 +23,7 @@ export function loadConfig(
   const dataDirectory = directory(environment.DATA_DIR, projectRoot, '.data');
   return {
     port: positiveNumber(environment.PORT, 3000),
+    bindHost: bindHost(environment.BIND_HOST ?? environment.HOST),
     flowTtlSeconds: positiveNumber(environment.FLOW_TTL_SECONDS, 300),
     signupTtlSeconds: positiveNumber(environment.SIGNUP_TTL_SECONDS, 600),
     debugUiEnabled: booleanValue(environment.DEBUG_UI_ENABLED, false),
@@ -34,6 +36,18 @@ export function loadConfig(
     diagnosticTraceDirectory: resolve(dataDirectory, 'diagnostic-traces'),
     staticDirectory: directory(environment.STATIC_DIR, projectRoot, 'dist'),
   };
+}
+
+/**
+ * The interface the server listens on. Loopback by default: behind a reverse
+ * proxy, binding every interface also publishes the app on its raw port over
+ * plaintext HTTP, which bypasses TLS and lets a flow be reached on an origin
+ * other than the one the verifier bound it to. Set BIND_HOST=0.0.0.0 only where
+ * that direct exposure is intended, such as inside a container.
+ */
+function bindHost(value: string | undefined): string {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : '127.0.0.1';
 }
 
 function directory(value: string | undefined, projectRoot: string, fallback: string): string {
