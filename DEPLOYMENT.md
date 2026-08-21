@@ -89,6 +89,17 @@ app's environment settings. Two are not optional:
 Do not set `PORT` to a fixed value if hPanel injects one; the server reads
 `process.env.PORT` and falls back to 3000.
 
+`BIND_HOST` (alias: `HOST`) chooses the interface the server listens on, and
+defaults to `127.0.0.1`. Leave it unset behind any reverse proxy — including
+hPanel's and nginx on a VPS. The proxy terminates TLS and forwards to loopback,
+and a loopback bind is what keeps the app from *also* answering on its raw port
+over plaintext HTTP. That is not merely untidy here: the verifier binds each
+OpenID4VP flow to the browser's origin, so an app reachable on a second
+origin and scheme undermines the guarantee the flow rests on. Set
+`BIND_HOST=0.0.0.0` only where direct exposure is intended — a container whose
+port you publish deliberately, for instance. The startup log prints the address
+actually bound, and warns when it is not loopback.
+
 ### 4. Enable automatic deployment
 
 Turn on auto-deploy (or "deploy on push") for the `hostinger-demo` branch in the
@@ -121,6 +132,13 @@ on a Node version the panel does not offer, or to deploy to a VPS.
 `.github/workflows/deploy-hostinger.yml` builds, ships `dist/`, `dist-server/`,
 `fixtures/`, and the manifests over rsync, installs production dependencies on
 the host, restarts, and health-checks the result.
+
+On a VPS you own the proxy, so this is where the bind address matters most:
+keep `BIND_HOST` unset so the app listens on `127.0.0.1`, point nginx or Apache
+at it, and confirm from off the host that `http://<server-ip>:3000/api/health`
+does *not* answer. A firewall rule dropping non-loopback traffic to the port is
+worth keeping as a second layer, but it should not be the only thing standing
+between the internet and the app.
 
 It is dormant until you set the repository variable
 `HOSTINGER_DEPLOY_ENABLED` to `true`. Configure under **Settings → Secrets and
