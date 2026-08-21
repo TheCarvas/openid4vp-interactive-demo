@@ -143,6 +143,44 @@ test('sample endpoint verifies the fixture and reuses the normal signup/sign-in 
   }
 });
 
+test('a configured public origin is the only origin a flow can be bound to', async () => {
+  const dataRoot = await mkdtemp(join(tmpdir(), 'openid4vp-origin-'));
+  const publicOrigin = 'https://openid4vp.lionwolfstar.tech';
+  const service = new AuthService({
+    transactions: new TransactionStore(),
+    accounts: new FileAccountRepository(join(dataRoot, 'accounts.json')),
+    activity: new FileActivityRepository(join(dataRoot, 'activity.json')),
+    flowTtlSeconds: 300,
+    signupTtlSeconds: 600,
+    projectRoot: process.cwd(),
+    diagnostics: DiagnosticTracer.disabled(),
+  });
+  const app = createApp({ authService: service, publicOrigin });
+  const server = app.listen(0, '127.0.0.1');
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      server.once('listening', resolve);
+      server.once('error', reject);
+    });
+    const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const prepare = (origin: string) => fetch(`${baseUrl}/api/auth/email/request`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: origin },
+      body: JSON.stringify({ protocol: 'openid4vp-v1-unsigned', claims: ['email', 'email_verified'] }),
+    });
+
+    const spoofed = await prepare('https://attacker.example');
+    assert.equal(spoofed.status, 400);
+
+    const accepted = await prepare(publicOrigin);
+    assert.equal(accepted.status, 200);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    await rm(dataRoot, { recursive: true, force: true });
+  }
+});
+
 async function post(
   baseUrl: string,
   path: string,

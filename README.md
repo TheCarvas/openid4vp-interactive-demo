@@ -177,11 +177,18 @@ For the detailed setup and test procedure, use [`docs/MOP.md`](docs/MOP.md).
 ```bash
 npm run dev          # API on 3000 + Vite on 5173
 npm run check        # TypeScript check
-npm run build        # Build web UI into dist/
+npm run build        # Build web UI into dist/ and compile the server into dist-server/
 npm test             # Contracts, verifier security cases, service, UI policy, and API integration
-npm start            # API + serves dist/ when it exists
+npm start            # Run the compiled server; serves dist/ when it exists
+npm run start:dev    # Run the server from TypeScript via tsx
 npm run reset-data   # Delete demo accounts so sign-up can be repeated
 ```
+
+## Deploying
+
+See [`DEPLOYMENT.md`](DEPLOYMENT.md) for the hosted setup: the app needs a
+persistent Node process, HTTPS, writable storage, and the page and API on one
+origin.
 
 ## What is intentionally demo-grade
 

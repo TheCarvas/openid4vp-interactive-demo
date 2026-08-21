@@ -1,0 +1,101 @@
+name: Deploy to Hostinger
+
+# Alternative to the hPanel "deploy from GitHub" integration, for when you want
+# GitHub Actions to own the deployment (build here, ship artifacts over SSH).
+#
+# It stays dormant until you set the repository variable
+# HOSTINGER_DEPLOY_ENABLED to "true", so merging this file changes nothing on
+# its own. See DEPLOYMENT.md for the secrets and variables it expects.
+
+on:
+  push:
+    branches: [hostinger-demo]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-hostinger
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: vars.HOSTINGER_DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+
+      - run: npm ci
+
+      - name: Verify before shipping
+        run: |
+          npm run check
+          npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Authorize the deploy host
+        env:
+          SSH_KEY: ${{ secrets.HOSTINGER_SSH_KEY }}
+          SSH_HOST: ${{ secrets.HOSTINGER_SSH_HOST }}
+          SSH_PORT: ${{ secrets.HOSTINGER_SSH_PORT }}
+          SSH_KNOWN_HOSTS: ${{ secrets.HOSTINGER_SSH_KNOWN_HOSTS }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          if [ -n "$SSH_KNOWN_HOSTS" ]; then
+            printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          else
+            ssh-keyscan -p "${SSH_PORT:-22}" "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          fi
+          chmod 600 ~/.ssh/known_hosts
+
+      # Only what the host needs to run: the built client, the compiled server,
+      # the sample-credential fixtures, and the manifests used to install
+      # production dependencies on the host itself.
+      - name: Upload the release
+        env:
+          SSH_HOST: ${{ secrets.HOSTINGER_SSH_HOST }}
+          SSH_USER: ${{ secrets.HOSTINGER_SSH_USER }}
+          SSH_PORT: ${{ secrets.HOSTINGER_SSH_PORT }}
+          APP_PATH: ${{ secrets.HOSTINGER_APP_PATH }}
+          RSYNC_RSH: ssh -i ~/.ssh/deploy_key -p ${{ secrets.HOSTINGER_SSH_PORT || 22 }}
+        run: |
+          rsync -az --delete \
+            dist dist-server fixtures package.json package-lock.json \
+            "$SSH_USER@$SSH_HOST:$APP_PATH/"
+
+      - name: Install production dependencies and restart
+        env:
+          SSH_HOST: ${{ secrets.HOSTINGER_SSH_HOST }}
+          SSH_USER: ${{ secrets.HOSTINGER_SSH_USER }}
+          SSH_PORT: ${{ secrets.HOSTINGER_SSH_PORT }}
+          APP_PATH: ${{ secrets.HOSTINGER_APP_PATH }}
+          RESTART_COMMAND: ${{ vars.HOSTINGER_RESTART_COMMAND }}
+        run: |
+          ssh -i ~/.ssh/deploy_key -p "${SSH_PORT:-22}" "$SSH_USER@$SSH_HOST" \
+            "set -e; cd '$APP_PATH'; npm ci --omit=dev; ${RESTART_COMMAND:-mkdir -p tmp && touch tmp/restart.txt}"
+
+      - name: Confirm the deployment is serving
+        env:
+          HEALTH_URL: ${{ vars.HOSTINGER_HEALTH_URL }}
+        run: |
+          if [ -z "$HEALTH_URL" ]; then
+            echo "HOSTINGER_HEALTH_URL is not set; skipping the post-deploy check."
+            exit 0
+          fi
+          for _ in $(seq 1 12); do
+            sleep 5
+            if curl -fsS "$HEALTH_URL" > /dev/null; then
+              echo "Deployment is healthy."
+              exit 0
+            fi
+          done
+          echo "Deployment did not report healthy at $HEALTH_URL." >&2
+          exit 1
