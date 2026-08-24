@@ -27,7 +27,9 @@ import {
   type DiagnosticLevel,
 } from '../shared/contracts/diagnostics.js';
 import { shouldOfferSampleCredential } from './fallback-policy.js';
+import { createGradientWaves } from './gradient-waves.js';
 
+const EM_DASH = '\u2014';
 const MAX_SAMPLE_UPLOAD_BYTES = 64 * 1024;
 const SAMPLE_CONTEXT_HINT = 'Expected: nonce, origin, validationTimeSeconds, issuerJwk.';
 const SAMPLE_RESPONSE_HINT = 'Expected: protocol and data.vp_token from the captured presentation.';
@@ -112,6 +114,14 @@ const diagnosticPanel = document.querySelector<HTMLDetailsElement>('#diagnostic-
 const diagnosticTraceIdEl = document.querySelector<HTMLSpanElement>('#diagnostic-trace-id')!;
 const diagnosticRefreshButton = document.querySelector<HTMLButtonElement>('#diagnostic-refresh')!;
 const debugOutput = document.querySelector<HTMLPreElement>('#debug-output')!;
+const claimCount = document.querySelector<HTMLSpanElement>('#claim-count')!;
+const capabilityProbe = document.querySelector<HTMLDListElement>('#capability-probe')!;
+const traceSummary = document.querySelector<HTMLDListElement>('#trace-summary')!;
+const traceEvents = document.querySelector<HTMLDivElement>('#trace-events')!;
+const traceEventsCount = document.querySelector<HTMLSpanElement>('#trace-events-count')!;
+const disclosedClaims = document.querySelector<HTMLElement>('#disclosed-claims')!;
+const disclosedClaimsCount = document.querySelector<HTMLSpanElement>('#disclosed-claims-count')!;
+const disclosedClaimsList = document.querySelector<HTMLDListElement>('#disclosed-claims-list')!;
 
 let preparedRequest: BackendAuthRequest | null = null;
 let signupToken: string | null = null;
@@ -131,6 +141,23 @@ let traceReady = false;
 let tracePollTimer: ReturnType<typeof setInterval> | undefined;
 let pendingFrontendEvents: DiagnosticEventInput[] = [];
 let localFrontendEvents: DiagnosticEventInput[] = [];
+let renderedTraceSignature = '';
+const expandedTraceEvents = new Set<string>();
+
+type KeyValueRow = { key: string; value: string; tone?: 'is-ok' | 'is-bad' };
+
+type LedgerEvent = {
+  key: string;
+  timestamp: string;
+  tier: string;
+  operation: string;
+  phase: string;
+  message: string;
+  raw: unknown;
+};
+
+const CHEVRON_SVG = '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" aria-hidden="true">'
+  + '<path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.7" stroke-linecap="square"/></svg>';
 
 function setStatus(message: string, kind: 'pending' | 'ready' | 'error' | 'success' = 'pending') {
   statusEl.textContent = message;
@@ -281,6 +308,30 @@ async function refreshDiagnosticTrace(): Promise<void> {
 
 function renderDiagnosticTrace(trace: AuthenticationTrace): void {
   debugOutput.textContent = JSON.stringify(trace, null, 2);
+  renderKeyValues(traceSummary, [
+    { key: 'traceId', value: trace.id },
+    { key: 'flowId', value: trace.flowId ?? EM_DASH },
+    { key: 'source', value: trace.source ?? EM_DASH },
+    { key: 'level', value: trace.level },
+    { key: 'startedAt', value: formatClockTime(trace.startedAt) },
+    { key: 'completedAt', value: trace.completedAt ? formatClockTime(trace.completedAt) : EM_DASH },
+    { key: 'duration', value: traceDuration(trace) },
+    {
+      key: 'outcome',
+      value: trace.outcome,
+      tone: trace.outcome === 'succeeded' ? 'is-ok' : trace.outcome === 'failed' ? 'is-bad' : undefined,
+    },
+    { key: 'artifacts', value: String(trace.artifacts.length) },
+  ]);
+  renderTraceEvents(trace.events.map((event) => ({
+    key: event.id,
+    timestamp: event.timestamp,
+    tier: event.tier,
+    operation: event.operation,
+    phase: event.phase,
+    message: event.message,
+    raw: event,
+  })));
 }
 
 function renderLocalDiagnostics(): void {
@@ -289,6 +340,154 @@ function renderLocalDiagnostics(): void {
     status: traceReady ? 'persisting' : 'waiting_for_backend_trace',
     frontendEvents: localFrontendEvents,
   }, null, 2);
+  renderKeyValues(traceSummary, [
+    { key: 'traceId', value: activeTraceId ?? EM_DASH },
+    { key: 'status', value: traceReady ? 'persisting' : 'waiting for backend trace' },
+    { key: 'level', value: diagnosticLevel },
+  ]);
+  renderTraceEvents(localFrontendEvents.map((event, index) => ({
+    key: `local:${index}`,
+    timestamp: event.timestamp ?? new Date().toISOString(),
+    tier: 'frontend',
+    operation: event.operation,
+    phase: event.phase,
+    message: event.message,
+    raw: event,
+  })));
+}
+
+function traceDuration(trace: AuthenticationTrace): string {
+  if (!trace.completedAt) return 'in progress';
+  const elapsed = Date.parse(trace.completedAt) - Date.parse(trace.startedAt);
+  return Number.isNaN(elapsed) ? EM_DASH : `${(elapsed / 1000).toFixed(3)} s`;
+}
+
+/** One ledger row per trace event; the full event JSON stays behind its own disclosure. */
+function renderTraceEvents(events: LedgerEvent[]): void {
+  traceEventsCount.textContent = `${events.length} ${events.length === 1 ? 'event' : 'events'}`;
+  const signature = events.map((event) => `${event.key}|${event.phase}|${event.message}`).join('~');
+  if (signature === renderedTraceSignature) return;
+  renderedTraceSignature = signature;
+  traceEvents.innerHTML = '';
+
+  if (events.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'trace-empty';
+    empty.textContent = 'No events captured yet.';
+    traceEvents.appendChild(empty);
+    return;
+  }
+
+  for (const event of events) traceEvents.appendChild(buildTraceEvent(event));
+}
+
+function buildTraceEvent(event: LedgerEvent): HTMLDetailsElement {
+  const container = document.createElement('details');
+  container.className = 'trace-event';
+  container.open = expandedTraceEvents.has(event.key);
+  container.addEventListener('toggle', () => {
+    if (container.open) expandedTraceEvents.add(event.key);
+    else expandedTraceEvents.delete(event.key);
+  });
+
+  const summary = document.createElement('summary');
+
+  const timestamp = document.createElement('span');
+  timestamp.className = 'ev-ts';
+  timestamp.textContent = formatClockTime(event.timestamp);
+
+  const main = document.createElement('span');
+  main.className = 'ev-main';
+  const operation = document.createElement('span');
+  operation.className = 'ev-op';
+  operation.textContent = event.operation;
+  const message = document.createElement('span');
+  message.className = 'ev-msg';
+  message.textContent = event.message;
+  main.append(operation, message);
+
+  const tier = document.createElement('span');
+  tier.className = 'ev-tier';
+  tier.textContent = event.tier;
+
+  const phase = document.createElement('span');
+  phase.className = `ev-res is-${event.phase}`;
+  phase.textContent = event.phase;
+
+  const chevron = document.createElement('span');
+  chevron.className = 'ev-chev';
+  chevron.innerHTML = CHEVRON_SVG;
+
+  summary.append(timestamp, main, tier, phase, chevron);
+
+  const json = document.createElement('pre');
+  json.textContent = JSON.stringify(event.raw, null, 2);
+
+  container.append(summary, json);
+  return container;
+}
+
+function renderKeyValues(target: HTMLElement, rows: KeyValueRow[]): void {
+  target.innerHTML = '';
+  for (const row of rows) {
+    const line = document.createElement('div');
+    const term = document.createElement('dt');
+    term.textContent = row.key;
+    const value = document.createElement('dd');
+    value.textContent = row.value;
+    if (row.tone) value.className = row.tone;
+    line.append(term, value);
+    target.appendChild(line);
+  }
+}
+
+function formatClockTime(value: string): string {
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? value : new Date(parsed).toISOString().slice(11, 23);
+}
+
+function renderCapabilityProbe(support: { ok: boolean; reason?: string }): void {
+  const credentialsGet = 'credentials' in navigator && typeof navigator.credentials?.get === 'function';
+  const digitalCredential = 'DigitalCredential' in window;
+  renderKeyValues(capabilityProbe, [
+    {
+      key: 'isSecureContext',
+      value: window.isSecureContext ? 'true' : 'false',
+      tone: window.isSecureContext ? 'is-ok' : 'is-bad',
+    },
+    {
+      key: 'navigator.credentials.get',
+      value: credentialsGet ? 'available' : 'missing',
+      tone: credentialsGet ? 'is-ok' : 'is-bad',
+    },
+    {
+      key: 'DigitalCredential',
+      value: digitalCredential ? 'exposed' : 'missing',
+      tone: digitalCredential ? 'is-ok' : 'is-bad',
+    },
+    {
+      key: 'wallet invocation',
+      value: support.ok ? 'ready' : 'unavailable',
+      tone: support.ok ? 'is-ok' : 'is-bad',
+    },
+  ]);
+}
+
+function updateClaimCount(): void {
+  claimCount.textContent = `${selectedClaims().length} of ${AVAILABLE_CLAIMS.length} selected`;
+}
+
+/** Claims the holder actually disclosed, as recorded on the account by the verifier. */
+function renderDisclosedClaims(account: Account): void {
+  const entries = Object.entries(account.verifiedClaims ?? {});
+  disclosedClaims.classList.toggle('hidden', entries.length === 0);
+  if (entries.length === 0) return;
+  disclosedClaimsCount.textContent = `${entries.length} ${entries.length === 1 ? 'claim' : 'claims'}`;
+  renderKeyValues(disclosedClaimsList, entries.map(([key, value]) => ({
+    key,
+    value: typeof value === 'string' ? value : JSON.stringify(value),
+    tone: value === true ? 'is-ok' as const : undefined,
+  })));
 }
 
 async function initializeDiagnostics(): Promise<void> {
@@ -763,6 +962,11 @@ function showSuccess(
     img.alt = '';
     img.referrerPolicy = 'no-referrer';
     accountCard.appendChild(img);
+  } else {
+    const monogram = document.createElement('div');
+    monogram.className = 'account-monogram';
+    monogram.textContent = accountInitials(account);
+    accountCard.appendChild(monogram);
   }
 
   const text = document.createElement('div');
@@ -781,9 +985,17 @@ function showSuccess(
   activityToggle.setAttribute('aria-expanded', 'false');
   activityToggle.textContent = 'View your OPENID4VP sign-in activity';
   activityToggle.classList.toggle('hidden', !returningUser);
+  renderDisclosedClaims(account);
   if (returningUser) renderActivityReport(returningUser.activity);
   setStatus(`Authentication flow completed successfully in ${source} mode.`, 'success');
   void refreshDiagnosticTrace();
+}
+
+function accountInitials(account: Account): string {
+  const source = accountDisplayName(account);
+  const parts = source.split(/[\s._@-]+/).filter(Boolean);
+  const letters = parts.slice(0, 2).map((part) => part[0]).join('');
+  return (letters || source.slice(0, 2)).toUpperCase();
 }
 
 function accountDisplayName(account: Account): string {
@@ -850,6 +1062,7 @@ for (const input of claimInputs) {
   input.addEventListener('change', () => {
     const hasClaims = selectedClaims().length > 0;
     continueButton.disabled = !hasClaims;
+    updateClaimCount();
     if (!hasClaims) setStatus('Select at least one claim to create a DCQL query.', 'error');
     else setStatus('Request options updated. Start sign-in when ready.', 'ready');
   });
@@ -942,9 +1155,59 @@ profileForm.addEventListener('submit', async (event) => {
   }
 });
 
+/**
+ * Swaps the static SVG backdrop for the live wave field. Left alone when the browser cannot run
+ * WebGL2, or when the visitor asked for reduced motion: the SVG in the markup is the fallback.
+ */
+function startBackground(): void {
+  const backdrop = document.querySelector<HTMLElement>('.bg');
+  const host = document.querySelector<HTMLElement>('#bg-waves');
+  if (!backdrop || !host) return;
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+  const narrow = window.matchMedia('(max-width: 720px)').matches;
+  const teardown = createGradientWaves(host, {
+    // The far field is almost entirely horizonColor, so a dark horizon renders the whole effect
+    // invisible against the page. A near-white crest blows the near band out instead, so the
+    // crest stays a mid azure and brightness does the lifting.
+    // Wide colour separation between wave body and crest is what gives the ridges definition;
+    // a light wave colour flattens them into a wash.
+    horizonColor: '#6b4712',
+    waveColor: '#a85f10',
+    crestColor: '#ffd06a',
+    speed: 0.26,
+    amplitude: 3.4,
+    waveScale: 1.3,
+    waveRatio: 0.9,
+    swell: 40,
+    turbulence: 24,
+    tilt: 1.14,
+    zoom: 1,
+    height: 5.5,
+    // fogDepth this high clamps the whole near field to fully opaque, which flattens the bottom
+    // of the frame into a single wash. Keep it short enough that near crests still fall off.
+    fogDepth: 22,
+    detail: narrow ? 'low' : 'medium',
+    brightness: 2.3,
+    opacity: 1,
+    mouseInteraction: !narrow,
+    parallaxStrength: 0.55,
+    grain: true,
+    grainIntensity: 0.04,
+  });
+
+  if (!teardown) return;
+  backdrop.classList.add('has-webgl');
+  window.addEventListener('pagehide', teardown, { once: true });
+}
+
+startBackground();
+
 const support = digitalCredentialSupport();
 browserApiAvailable = support.ok;
 browserSupportReason = support.reason;
+renderCapabilityProbe(support);
+updateClaimCount();
 continueButton.disabled = selectedClaims().length === 0;
 if (!support.ok) {
   setStatus(`You can prepare a request, but this browser cannot invoke a wallet: ${support.reason}`, 'ready');
